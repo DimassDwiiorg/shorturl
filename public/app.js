@@ -41,11 +41,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const qrTargetUrl = document.getElementById('qr-target-url');
   const btnDownloadQr = document.getElementById('btn-download-qr');
 
-  const linksCountBadge = document.getElementById('links-count-badge');
-  const linksListContainer = document.getElementById('links-list-container');
-  const emptyState = document.getElementById('empty-state');
-  const btnRefresh = document.getElementById('btn-refresh');
-
   const toast = document.getElementById('toast');
   const toastText = document.getElementById('toast-text');
 
@@ -224,9 +219,6 @@ document.addEventListener('DOMContentLoaded', () => {
       resultContainer.classList.remove('hidden');
       resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-      // Refresh recent links
-      loadRecentLinks();
-
       showToast(`Tautan nexaa.my.id/${link.slug} siap digunakan!`);
 
     } catch (err) {
@@ -303,121 +295,5 @@ document.addEventListener('DOMContentLoaded', () => {
     link.click();
     showToast('Gambar QR Code berhasil diunduh');
   });
-
-  // =======================================================
-  // 8. Recent Links List & Analytics
-  // =======================================================
-  async function loadRecentLinks() {
-    try {
-      const res = await fetch('/api/links');
-      const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) return;
-      const data = await res.json();
-
-      if (!res.ok || !data.success) return;
-
-      const links = data.links || [];
-      linksCountBadge.textContent = `${links.length} Link`;
-
-      if (links.length === 0) {
-        linksListContainer.innerHTML = '';
-        linksListContainer.appendChild(emptyState);
-        return;
-      }
-
-      linksListContainer.innerHTML = '';
-
-      links.forEach((link) => {
-        const row = document.createElement('div');
-        row.className = 'link-row-card';
-
-        const createdDate = new Date(link.createdAt).toLocaleDateString('id-ID', {
-          day: 'numeric',
-          month: 'short',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
-
-        row.innerHTML = `
-          <div class="link-info">
-            <div class="link-short-row">
-              <a href="/${link.slug}" target="_blank" class="link-short-text" title="Buka tautan">${link.shortUrl}</a>
-              <span class="link-clicks-pill" title="Jumlah total klik">
-                <i class="fa-solid fa-chart-simple"></i>
-                <span>${link.clicks || 0} Klik</span>
-              </span>
-            </div>
-            <div class="link-dest-text" title="${link.destination}">
-              ${link.destination} • <span style="color: #555e70;">${createdDate}</span>
-            </div>
-          </div>
-          <div class="link-row-actions">
-            <button type="button" class="btn-row-action btn-copy-row" title="Salin Link">
-              <i class="fa-regular fa-clone"></i>
-            </button>
-            <button type="button" class="btn-row-action btn-qr-row" title="Lihat QR Code">
-              <i class="fa-solid fa-qrcode"></i>
-            </button>
-            <a href="/${link.slug}" target="_blank" class="btn-row-action" title="Uji Redirect">
-              <i class="fa-solid fa-arrow-up-right-from-square"></i>
-            </a>
-            <button type="button" class="btn-row-action delete btn-delete-row" title="Hapus">
-              <i class="fa-regular fa-trash-can"></i>
-            </button>
-          </div>
-        `;
-
-        // Row events
-        row.querySelector('.btn-copy-row').addEventListener('click', async () => {
-          await navigator.clipboard.writeText(link.shortUrl);
-          showToast(`Tersalin: ${link.shortUrl}`);
-        });
-
-        row.querySelector('.btn-qr-row').addEventListener('click', () => {
-          activeSlug = link.slug;
-          openQrModal(link.shortUrl);
-        });
-
-        row.querySelector('.btn-delete-row').addEventListener('click', async () => {
-          if (confirm(`Hapus tautan '${link.shortUrl}'?`)) {
-            await deleteLink(link.id);
-          }
-        });
-
-        linksListContainer.appendChild(row);
-      });
-
-    } catch (err) {
-      console.error('Error loading links:', err);
-    }
-  }
-
-  async function deleteLink(id) {
-    try {
-      const res = await fetch(`/api/links/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast('Tautan berhasil dihapus');
-        loadRecentLinks();
-      } else {
-        showToast(data.error || 'Gagal menghapus tautan', 'fa-circle-exclamation');
-      }
-    } catch {
-      showToast('Gagal menghapus tautan', 'fa-circle-exclamation');
-    }
-  }
-
-  btnRefresh.addEventListener('click', () => {
-    btnRefresh.classList.add('fa-spin');
-    loadRecentLinks().finally(() => {
-      setTimeout(() => {
-        btnRefresh.classList.remove('fa-spin');
-      }, 400);
-      showToast('Data statistik diperbarui');
-    });
-  });
-
-  // Initial fetch
-  loadRecentLinks();
 
 });

@@ -220,18 +220,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Get all links
-app.get('/api/links', async (req, res) => {
-  const links = await readAllLinks();
-  links.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  res.json({
-    success: true,
-    domain: BRAND_DOMAIN,
-    storage: HAS_KV ? 'kv' : 'file',
-    links
-  });
-});
-
 // Get overview stats
 app.get('/api/stats', async (req, res) => {
   const links = await readAllLinks();
@@ -316,27 +304,6 @@ app.post('/api/shorten', async (req, res) => {
   res.status(201).json({
     success: true,
     link: newLink
-  });
-});
-
-// Delete a link
-app.delete('/api/links/:id', async (req, res) => {
-  const { id } = req.params;
-  let links = await readAllLinks();
-  const initialLength = links.length;
-  links = links.filter(l => l.id !== id);
-
-  if (links.length === initialLength) {
-    return res.status(404).json({
-      success: false,
-      error: 'Tautan tidak ditemukan.'
-    });
-  }
-
-  await saveAllLinks(links);
-  res.json({
-    success: true,
-    message: 'Tautan berhasil dihapus.'
   });
 });
 

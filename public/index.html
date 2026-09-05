@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexaa — Refined Link Shortener & Analytics</title>
+  <meta name="description" content="Pemendek tautan modern, bersih, dan profesional dengan domain nexaa.my.id. Dilengkapi custom slug, pelacakan klik, dan QR Code.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- =======================================================
+       Loading Screen (Sleek, Minimalist, High-End Preloader)
+       ======================================================= -->
+  <div id="preloader" class="preloader">
+    <div class="preloader-inner">
+      <div class="brand-monogram-box">
+        <span class="monogram-letter">N</span>
+      </div>
+      <div class="preloader-wordmark">N E X A A</div>
+      <div class="preloader-status-text" id="preloader-status">Mempersiapkan rute nexaa.my.id...</div>
+      
+      <div class="preloader-track">
+        <div class="preloader-bar" id="preloader-bar"></div>
+      </div>
+      
+      <div class="preloader-counter" id="preloader-counter">00%</div>
+    </div>
+  </div>
+
+  <!-- Page Background Grain & Subtle Gradient -->
+  <div class="bg-vignette"></div>
+
+  <!-- =======================================================
+       Main Application
+       ======================================================= -->
+  <div class="app-shell">
+
+    <!-- Top Navigation -->
+    <header class="navbar">
+      <div class="nav-container">
+        <a href="/" class="brand-logo">
+          <div class="brand-icon">
+            <span>N</span>
+          </div>
+          <div class="brand-text-group">
+            <span class="brand-name">nexaa</span>
+            <span class="brand-tld">.my.id</span>
+          </div>
+        </a>
+
+        <div class="nav-right">
+          <div class="system-status-pill">
+            <span class="status-dot"></span>
+            <span class="status-label">Network Active</span>
+          </div>
+          <a href="#recent-section" class="nav-link-btn">
+            <i class="fa-solid fa-clock-rotate-left"></i>
+            <span>Riwayat Link</span>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <!-- Hero & Form Section -->
+    <main class="main-content">
+      <div class="content-container">
+
+        <!-- Hero Heading -->
+        <section class="hero-section">
+          <div class="hero-badge">
+            <i class="fa-solid fa-shield-halved"></i>
+            <span>LINK MANAGEMENT & ANALYTICS</span>
+          </div>
+          <h1 class="hero-title">
+            Pemendek Tautan Presisi, <br>
+            <span class="hero-title-sub">Bersih & Berkelas.</span>
+          </h1>
+          <p class="hero-subtitle">
+            Ringkas tautan panjang Anda dengan domain <strong>nexaa.my.id</strong>. Lengkap dengan custom alias, generator QR Code, dan pelacakan klik real-time.
+          </p>
+        </section>
+
+        <!-- Shortener Form Card -->
+        <section class="shortener-card">
+          <form id="shorten-form" class="shorten-form" novalidate>
+            
+            <!-- Long URL Input Field -->
+            <div class="form-group">
+              <div class="field-header">
+                <label for="input-url" class="field-label">
+                  <i class="fa-solid fa-link"></i> URL TUJUAN ASLI
+                </label>
+                <button type="button" id="btn-paste" class="btn-text-action">
+                  <i class="fa-regular fa-clipboard"></i> Tempel dari Clipboard
+                </button>
+              </div>
+
+              <div class="input-wrapper">
+                <i class="fa-solid fa-globe input-icon"></i>
+                <input 
+                  type="url" 
+                  id="input-url" 
+                  class="styled-input" 
+                  placeholder="https://contoh-website-kamu.com/halaman-panjang..." 
+                  required 
+                  autocomplete="off"
+                  spellcheck="false"
+                >
+                <button type="button" id="btn-clear-url" class="btn-clear hidden" title="Hapus">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Custom Slug Accordion / Input -->
+            <div class="custom-slug-section">
+              <div class="custom-slug-header" id="toggle-custom-slug">
+                <div class="custom-slug-title">
+                  <i class="fa-solid fa-sliders"></i>
+                  <span>Kustomisasi Alias Tautan (Opsional)</span>
+                </div>
+                <i class="fa-solid fa-chevron-down toggle-icon" id="slug-chevron"></i>
+              </div>
+
+              <div class="custom-slug-body" id="custom-slug-body">
+                <p class="custom-slug-help">Buat akhiran link yang mudah diingat untuk branding pribadi atau promosi:</p>
+                <div class="slug-input-group">
+                  <div class="domain-prefix">nexaa.my.id /</div>
+                  <input 
+                    type="text" 
+                    id="input-slug" 
+                    class="slug-input" 
+                    placeholder="misal: promo-merdeka"
+                    maxlength="30"
+                    autocomplete="off"
+                    spellcheck="false"
+                  >
+                </div>
+                <span class="slug-hint">Gunakan 3-30 karakter huruf, angka, tanda hubung (-) atau (_)</span>
+              </div>
+            </div>
+
+            <!-- Submit Button -->
+            <div class="form-actions">
+              <button type="submit" id="btn-submit" class="btn-primary">
+                <span id="submit-text">Perpendek Tautan</span>
+                <i class="fa-solid fa-arrow-right" id="submit-icon"></i>
+              </button>
+            </div>
+
+            <!-- Error Banner (if any) -->
+            <div id="error-banner" class="error-banner hidden">
+              <i class="fa-solid fa-circle-exclamation"></i>
+              <span id="error-message">Pesan error</span>
+            </div>
+
+          </form>
+
+          <!-- Result Card (Renders smoothly after link created) -->
+          <div id="result-container" class="result-container hidden">
+            <div class="result-card">
+              <div class="result-status-row">
+                <div class="result-badge-success">
+                  <i class="fa-solid fa-circle-check"></i>
+                  <span>Tautan Berhasil Dibuat</span>
+                </div>
+                <span class="result-date" id="result-date">Baru saja</span>
+              </div>
+
+              <div class="result-link-display">
+                <div class="link-label">Tautan Pendek Nexaa:</div>
+                <div class="short-url-text" id="result-short-url">https://nexaa.my.id/...</div>
+                <div class="original-url-text" id="result-dest-url">Tujuan: https://...</div>
+              </div>
+
+              <div class="result-actions-grid">
+                <button type="button" id="btn-copy" class="btn-action-primary">
+                  <i class="fa-regular fa-clone"></i>
+                  <span id="copy-btn-text">Salin Tautan</span>
+                </button>
+                <button type="button" id="btn-qr" class="btn-action-secondary">
+                  <i class="fa-solid fa-qrcode"></i>
+                  <span>QR Code</span>
+                </button>
+                <a id="btn-test-link" href="#" target="_blank" class="btn-action-secondary">
+                  <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                  <span>Uji Redirect</span>
+                </a>
+              </div>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- QR Code Modal / Drawer -->
+        <div id="qr-modal" class="modal-overlay hidden">
+          <div class="modal-box">
+            <div class="modal-header">
+              <div class="modal-title">
+                <i class="fa-solid fa-qrcode"></i>
+                <span>QR Code Nexaa</span>
+              </div>
+              <button type="button" id="btn-close-qr" class="btn-modal-close">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div class="qr-preview-area">
+              <canvas id="qr-canvas"></canvas>
+            </div>
+            <div class="qr-target-text" id="qr-target-url">https://nexaa.my.id/...</div>
+            <div class="modal-footer">
+              <button type="button" id="btn-download-qr" class="btn-download-qr">
+                <i class="fa-solid fa-download"></i> Unduh Gambar QR (PNG)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Links Section -->
+        <section id="recent-section" class="recent-section">
+          <div class="section-header">
+            <div class="section-title-wrap">
+              <h2 class="section-title">Riwayat Tautan</h2>
+              <span class="badge-count" id="links-count-badge">0 Link</span>
+            </div>
+            <button type="button" id="btn-refresh" class="btn-icon-refresh" title="Perbarui Data">
+              <i class="fa-solid fa-rotate-right"></i>
+            </button>
+          </div>
+
+          <div id="links-list-container" class="links-list-container">
+            <!-- Dynamic items rendered by app.js -->
+            <div class="empty-state" id="empty-state">
+              <div class="empty-icon">
+                <i class="fa-solid fa-link-slash"></i>
+              </div>
+              <p class="empty-title">Belum ada tautan yang dibuat</p>
+              <p class="empty-desc">Tautan yang Anda perpendek akan tersimpan di sini lengkap dengan jumlah pelacakan klik.</p>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <div class="footer-container">
+        <div class="footer-left">
+          <span class="footer-brand">nexaa.my.id</span>
+          <span class="footer-sep">•</span>
+          <span class="footer-desc">Minimalist High-Speed Link Infrastructure</span>
+        </div>
+        <div class="footer-right">
+          <span>Developed by <strong class="author-highlight">Dimass</strong></span>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast hidden">
+    <i class="fa-solid fa-circle-check"></i>
+    <span id="toast-text">Tautan berhasil disalin ke clipboard</span>
+  </div>
+
+  <!-- QR Code Generator Library (Lightweight JS) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

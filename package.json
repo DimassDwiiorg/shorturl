@@ -1,0 +1,21 @@
+{
+  "name": "nexaa-shortlink",
+  "version": "1.0.0",
+  "description": "Nexaa (nexaa.my.id) - Elegant, Minimalist, and Fast URL Shortener",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "url-shortener",
+    "shortlink",
+    "nexaa",
+    "clean-design"
+  ],
+  "author": "Dimass",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}

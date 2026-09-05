@@ -1,0 +1,22 @@
+[
+  {
+    "id": "lnk_mtomlodvf5dr",
+    "slug": "spkv75",
+    "destination": "https://google.com/",
+    "shortUrl": "https://nexaa.my.id/spkv75",
+    "localTestUrl": "http://localhost:3001/spkv75",
+    "clicks": 0,
+    "createdAt": "2026-09-05T16:57:29.011Z",
+    "lastAccessedAt": null
+  },
+  {
+    "id": "lnk_mtomloe4sciv",
+    "slug": "dimas-dev",
+    "destination": "https://github.com/dimas",
+    "shortUrl": "https://nexaa.my.id/dimas-dev",
+    "localTestUrl": "http://localhost:3001/dimas-dev",
+    "clicks": 1,
+    "createdAt": "2026-09-05T16:57:29.020Z",
+    "lastAccessedAt": "2026-09-05T16:57:29.050Z"
+  }
+]

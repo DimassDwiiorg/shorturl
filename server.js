@@ -2,12 +2,32 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const BRAND_DOMAIN = process.env.BRAND_DOMAIN || 'nexaa.my.id';
 
-const DATA_FILE = path.join(__dirname, 'data', 'links.json');
+// Environment detection
+const IS_VERCEL = !!(process.env.VERCEL || process.env.NOW_REGION || process.env.AWS_LAMBDA_FUNCTION_NAME);
+
+// Data paths
+const LOCAL_DATA_FILE = path.join(__dirname, 'data', 'links.json');
+const VERCEL_DATA_FILE = path.join(os.tmpdir(), 'nexaa_links.json');
+const DATA_FILE = IS_VERCEL ? VERCEL_DATA_FILE : LOCAL_DATA_FILE;
+
+// KV / Redis Configuration (Vercel KV or Upstash Redis)
+const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+const HAS_KV = !!(KV_URL && KV_TOKEN);
+
+// Global In-Memory Cache (preserves state across warm lambda requests)
+if (!global.__NEXAA_CACHE__) {
+  global.__NEXAA_CACHE__ = {
+    links: [],
+    initialized: false
+  };
+}
 
 // Middleware
 app.use(cors());
@@ -15,32 +35,130 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Database helper
-function readLinks() {
+// ==========================================================
+// Multi-Tier Storage Engine
+// ==========================================================
+
+// KV REST helper
+async function kvFetch(command, ...args) {
+  if (!HAS_KV) return null;
   try {
-    if (!fs.existsSync(DATA_FILE)) {
-      fs.writeFileSync(DATA_FILE, JSON.stringify([], null, 2));
-      return [];
-    }
-    const data = fs.readFileSync(DATA_FILE, 'utf-8');
-    return JSON.parse(data || '[]');
+    const url = `${KV_URL}/${command}/${args.map(encodeURIComponent).join('/')}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${KV_TOKEN}` }
+    });
+    const data = await res.json();
+    return data.result;
   } catch (err) {
-    console.error('Error reading links file:', err);
-    return [];
+    console.error('[KV Error]', err.message);
+    return null;
   }
 }
 
-function saveLinks(links) {
+// Initialize seed data
+function initStorage() {
+  if (global.__NEXAA_CACHE__.initialized) return;
+
+  let seedLinks = [];
   try {
+    if (fs.existsSync(LOCAL_DATA_FILE)) {
+      const raw = fs.readFileSync(LOCAL_DATA_FILE, 'utf-8');
+      seedLinks = JSON.parse(raw || '[]');
+    }
+  } catch (e) {
+    console.error('Error reading seed file:', e.message);
+  }
+
+  // If on Vercel and /tmp doesn't have the file yet, seed it
+  if (IS_VERCEL) {
+    try {
+      if (!fs.existsSync(VERCEL_DATA_FILE)) {
+        fs.writeFileSync(VERCEL_DATA_FILE, JSON.stringify(seedLinks, null, 2));
+      } else {
+        const tmpRaw = fs.readFileSync(VERCEL_DATA_FILE, 'utf-8');
+        const tmpLinks = JSON.parse(tmpRaw || '[]');
+        if (tmpLinks.length > 0) {
+          seedLinks = tmpLinks;
+        }
+      }
+    } catch (e) {
+      console.error('Error seeding /tmp file:', e.message);
+    }
+  }
+
+  global.__NEXAA_CACHE__.links = seedLinks;
+  global.__NEXAA_CACHE__.initialized = true;
+}
+
+// Read all links
+async function readAllLinks() {
+  initStorage();
+
+  // If KV is connected, sync with KV
+  if (HAS_KV) {
+    try {
+      const kvData = await kvFetch('get', 'nexaa:all_links');
+      if (kvData) {
+        const parsed = typeof kvData === 'string' ? JSON.parse(kvData) : kvData;
+        if (Array.isArray(parsed)) {
+          global.__NEXAA_CACHE__.links = parsed;
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.error('[KV Read Error]', err.message);
+    }
+  }
+
+  // Otherwise read from file / cache
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const data = fs.readFileSync(DATA_FILE, 'utf-8');
+      const parsed = JSON.parse(data || '[]');
+      global.__NEXAA_CACHE__.links = parsed;
+      return parsed;
+    }
+  } catch (err) {
+    console.error('[File Read Error]', err.message);
+  }
+
+  return global.__NEXAA_CACHE__.links;
+}
+
+// Save all links
+async function saveAllLinks(links) {
+  global.__NEXAA_CACHE__.links = links;
+
+  // 1. Save to KV if available
+  if (HAS_KV) {
+    try {
+      const res = await fetch(`${KV_URL}/set/nexaa:all_links`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${KV_TOKEN}` },
+        body: JSON.stringify(links)
+      });
+      const data = await res.json();
+      console.log('[KV Saved]', data.result);
+    } catch (err) {
+      console.error('[KV Save Error]', err.message);
+    }
+  }
+
+  // 2. Save to file (in /tmp on Vercel, or data/ on local)
+  try {
+    const dir = path.dirname(DATA_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
     fs.writeFileSync(DATA_FILE, JSON.stringify(links, null, 2));
     return true;
   } catch (err) {
-    console.error('Error saving links file:', err);
+    console.error('[File Save Error]', err.message);
     return false;
   }
 }
 
-// Generate friendly random slug (avoiding ambiguous characters)
+// Generate friendly random slug
 function generateSlug(length = 6) {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
   let slug = '';
@@ -50,14 +168,14 @@ function generateSlug(length = 6) {
   return slug;
 }
 
-// Reserved words that cannot be used as custom slugs
+// Reserved words
 const RESERVED_SLUGS = new Set([
   'api', 'public', 'assets', 'favicon.ico', 'robots.txt',
   'admin', 'dashboard', 'settings', 'login', 'register',
   '404', 'index', 'style.css', 'app.js'
 ]);
 
-// Normalize URL (ensure http:// or https:// prefix)
+// Normalize URL
 function normalizeUrl(url) {
   let trimmed = (url || '').trim();
   if (!/^https?:\/\//i.test(trimmed)) {
@@ -74,21 +192,37 @@ function normalizeUrl(url) {
   }
 }
 
-// API: Get all links
-app.get('/api/links', (req, res) => {
-  const links = readLinks();
-  // Sort by createdAt descending
+// ==========================================================
+// API Routes
+// ==========================================================
+
+// Health / Status endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    domain: BRAND_DOMAIN,
+    isVercel: IS_VERCEL,
+    storageType: HAS_KV ? 'Vercel KV / Redis' : (IS_VERCEL ? 'Vercel /tmp + Memory' : 'Local File System'),
+    hasKvConnected: HAS_KV,
+    totalCachedLinks: global.__NEXAA_CACHE__.links.length
+  });
+});
+
+// Get all links
+app.get('/api/links', async (req, res) => {
+  const links = await readAllLinks();
   links.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   res.json({
     success: true,
     domain: BRAND_DOMAIN,
+    storage: HAS_KV ? 'kv' : 'file',
     links
   });
 });
 
-// API: Get overview stats
-app.get('/api/stats', (req, res) => {
-  const links = readLinks();
+// Get overview stats
+app.get('/api/stats', async (req, res) => {
+  const links = await readAllLinks();
   const totalClicks = links.reduce((acc, curr) => acc + (curr.clicks || 0), 0);
   res.json({
     success: true,
@@ -97,8 +231,8 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
-// API: Shorten URL
-app.post('/api/shorten', (req, res) => {
+// Shorten URL
+app.post('/api/shorten', async (req, res) => {
   const { url, customSlug } = req.body;
 
   if (!url || typeof url !== 'string' || !url.trim()) {
@@ -116,13 +250,12 @@ app.post('/api/shorten', (req, res) => {
     });
   }
 
-  const links = readLinks();
+  const links = await readAllLinks();
   let slug = '';
 
   if (customSlug && typeof customSlug === 'string' && customSlug.trim()) {
     const cleanSlug = customSlug.trim().toLowerCase();
 
-    // Validate format: 3 - 30 alphanumeric with dash / underscore
     if (!/^[a-z0-9_-]{3,30}$/.test(cleanSlug)) {
       return res.status(400).json({
         success: false,
@@ -137,7 +270,6 @@ app.post('/api/shorten', (req, res) => {
       });
     }
 
-    // Check if alias already taken
     const exists = links.some(l => l.slug.toLowerCase() === cleanSlug);
     if (exists) {
       return res.status(409).json({
@@ -148,12 +280,11 @@ app.post('/api/shorten', (req, res) => {
 
     slug = cleanSlug;
   } else {
-    // Generate unique random slug
     let attempts = 0;
     do {
       slug = generateSlug(6);
       attempts++;
-    } while (links.some(l => l.slug === slug) && attempts < 20);
+    } while (links.some(l => l.slug.toLowerCase() === slug.toLowerCase()) && attempts < 20);
   }
 
   const newLink = {
@@ -168,7 +299,7 @@ app.post('/api/shorten', (req, res) => {
   };
 
   links.push(newLink);
-  saveLinks(links);
+  await saveAllLinks(links);
 
   res.status(201).json({
     success: true,
@@ -176,10 +307,10 @@ app.post('/api/shorten', (req, res) => {
   });
 });
 
-// API: Delete a link
-app.delete('/api/links/:id', (req, res) => {
+// Delete a link
+app.delete('/api/links/:id', async (req, res) => {
   const { id } = req.params;
-  let links = readLinks();
+  let links = await readAllLinks();
   const initialLength = links.length;
   links = links.filter(l => l.id !== id);
 
@@ -190,7 +321,7 @@ app.delete('/api/links/:id', (req, res) => {
     });
   }
 
-  saveLinks(links);
+  await saveAllLinks(links);
   res.json({
     success: true,
     message: 'Tautan berhasil dihapus.'
@@ -198,31 +329,36 @@ app.delete('/api/links/:id', (req, res) => {
 });
 
 // Redirect Route: /:slug
-app.get('/:slug', (req, res) => {
+app.get('/:slug', async (req, res) => {
   const { slug } = req.params;
-  const links = readLinks();
+  const links = await readAllLinks();
 
   const link = links.find(l => l.slug.toLowerCase() === slug.toLowerCase());
 
   if (link) {
-    // Update clicks and lastAccessedAt
     link.clicks = (link.clicks || 0) + 1;
     link.lastAccessedAt = new Date().toISOString();
-    saveLinks(links);
+    
+    // Save updated clicks in background
+    saveAllLinks(links).catch(e => console.error('Error saving clicks:', e.message));
 
-    // Redirect to destination
     return res.redirect(302, link.destination);
   }
 
-  // Not found -> Show elegant 404 page
+  // Not found -> 404 page
   res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`===========================================`);
-  console.log(`✨ Nexaa Link Shortener Server`);
-  console.log(`🌐 Branding Domain: https://${BRAND_DOMAIN}`);
-  console.log(`🚀 Local Server: http://localhost:${PORT}`);
-  console.log(`===========================================`);
-});
+// Export app for Vercel Serverless Function & listen on local
+if (process.env.NODE_ENV !== 'production' || !IS_VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`===========================================`);
+    console.log(`✨ Nexaa Link Shortener Server`);
+    console.log(`🌐 Branding Domain: https://${BRAND_DOMAIN}`);
+    console.log(`🚀 Local Server: http://localhost:${PORT}`);
+    console.log(`💾 Storage Mode: ${HAS_KV ? 'Vercel KV' : (IS_VERCEL ? 'Vercel /tmp' : 'Local File')}`);
+    console.log(`===========================================`);
+  });
+}
+
+module.exports = app;

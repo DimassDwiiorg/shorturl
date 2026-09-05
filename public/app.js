@@ -196,7 +196,15 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({ url, customSlug })
       });
 
-      const data = await res.json();
+      let data;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        console.error('Non-JSON response:', text);
+        throw new Error(`Gagal memproses (Status ${res.status}). Pastikan konfigurasi rute Vercel sudah diperbarui.`);
+      }
 
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Gagal memperpendek tautan.');
@@ -302,6 +310,8 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadRecentLinks() {
     try {
       const res = await fetch('/api/links');
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) return;
       const data = await res.json();
 
       if (!res.ok || !data.success) return;

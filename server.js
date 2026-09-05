@@ -32,8 +32,20 @@ if (!global.__NEXAA_CACHE__) {
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Normalize URL for Vercel Serverless Rewrites
+app.use((req, res, next) => {
+  if (req.url.startsWith('/server.js') || req.url.startsWith('/api/index.js')) {
+    const orig = req.headers['x-matched-path'] || req.headers['x-now-route-matches'] || req.headers['x-forwarded-uri'];
+    if (orig && !orig.endsWith('/server.js') && !orig.endsWith('/index.js')) {
+      req.url = orig;
+    } else {
+      req.url = req.url.replace(/^\/(?:server\.js|api\/index\.js)/, '') || '/';
+    }
+  }
+  next();
+});
 
 // ==========================================================
 // Multi-Tier Storage Engine

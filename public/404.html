@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tautan Tidak Ditemukan — Nexaa</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .notfound-wrapper {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+    .notfound-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg);
+      padding: 48px 36px;
+      max-width: 460px;
+      width: 100%;
+      box-shadow: var(--card-shadow);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .notfound-code {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 64px;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: -2px;
+      margin-bottom: 8px;
+    }
+    .notfound-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 12px;
+    }
+    .notfound-desc {
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-vignette"></div>
+
+  <div class="notfound-wrapper">
+    <div class="notfound-card">
+      <div class="brand-monogram-box" style="margin-bottom: 20px;">
+        <span class="monogram-letter">N</span>
+      </div>
+      <div class="notfound-code">404</div>
+      <h1 class="notfound-title">Tautan Tidak Ditemukan</h1>
+      <p class="notfound-desc">
+        Tautan pendek yang Anda tuju di domain <strong>nexaa.my.id</strong> tidak terdaftar dalam sistem atau telah dihapus oleh pemiliknya.
+      </p>
+      <a href="/" class="btn-primary" style="text-decoration: none; width: auto; padding: 12px 24px;">
+        <i class="fa-solid fa-arrow-left"></i>
+        <span>Kembali ke Beranda Nexaa</span>
+      </a>
+    </div>
+  </div>
+</body>
+</html>

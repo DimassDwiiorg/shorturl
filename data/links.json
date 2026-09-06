@@ -7,6 +7,7 @@
     "localTestUrl": "http://localhost:3001/spkv75",
     "clicks": 0,
     "createdAt": "2026-09-05T16:57:29.011Z",
+    "expiresAt": "2026-10-05T16:57:29.011Z",
     "lastAccessedAt": null
   },
   {
@@ -15,8 +16,31 @@
     "destination": "https://github.com/dimas",
     "shortUrl": "https://nexaa.my.id/dimas-dev",
     "localTestUrl": "http://localhost:3001/dimas-dev",
-    "clicks": 1,
+    "clicks": 2,
     "createdAt": "2026-09-05T16:57:29.020Z",
-    "lastAccessedAt": "2026-09-05T16:57:29.050Z"
+    "expiresAt": "2026-10-05T16:57:29.020Z",
+    "lastAccessedAt": "2026-09-06T13:41:01.371Z"
+  },
+  {
+    "id": "lnk_mtpuuyhcnx4w",
+    "slug": "nvxr4v",
+    "destination": "https://example.com/",
+    "shortUrl": "https://nexaa.my.id/nvxr4v",
+    "localTestUrl": "http://localhost:3001/nvxr4v",
+    "clicks": 2,
+    "createdAt": "2026-09-06T13:36:25.104Z",
+    "expiresAt": "2026-10-06T13:36:25.104Z",
+    "lastAccessedAt": "2026-09-06T13:40:15.234Z"
+  },
+  {
+    "id": "lnk_mtpv3lymftkr",
+    "slug": "2zz85p",
+    "destination": "http://localhost:3001/",
+    "shortUrl": "https://nexaa.my.id/2zz85p",
+    "localTestUrl": "http://localhost:3001/2zz85p",
+    "clicks": 1,
+    "createdAt": "2026-09-06T13:43:08.782Z",
+    "expiresAt": "2026-10-06T13:43:08.782Z",
+    "lastAccessedAt": "2026-09-06T13:43:57.404Z"
   }
 ]

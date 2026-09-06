@@ -8,6 +8,9 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const BRAND_DOMAIN = process.env.BRAND_DOMAIN || 'nexaa.my.id';
 
+// Link expiry duration: 30 days in milliseconds
+const LINK_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
+
 // Environment detection
 const IS_VERCEL = !!(process.env.VERCEL || process.env.NOW_REGION || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
@@ -67,15 +70,43 @@ async function kvFetch(command, ...args) {
   }
 }
 
-// Initialize seed data
+// Migrate legacy links that don't have expiresAt yet
+// They will be given 30 days from their createdAt date
+function migrateLegacyLinks(links) {
+  let changed = false;
+  const migrated = links.map(link => {
+    if (!link.expiresAt) {
+      const base = link.createdAt ? new Date(link.createdAt) : new Date();
+      const expiresAt = new Date(base.getTime() + LINK_EXPIRY_MS).toISOString();
+      changed = true;
+      return { ...link, expiresAt };
+    }
+    return link;
+  });
+  return { links: migrated, changed };
+}
+
+// Check if a link is expired
+function isExpired(link) {
+  if (!link.expiresAt) return false;
+  return new Date() > new Date(link.expiresAt);
+}
+
+// Initialize seed data — always reads from disk on each new process startup
 function initStorage() {
   if (global.__NEXAA_CACHE__.initialized) return;
 
   let seedLinks = [];
+
+  // Always try to read from local data file first (persistent storage)
   try {
     if (fs.existsSync(LOCAL_DATA_FILE)) {
       const raw = fs.readFileSync(LOCAL_DATA_FILE, 'utf-8');
-      seedLinks = JSON.parse(raw || '[]');
+      const parsed = JSON.parse(raw || '[]');
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        seedLinks = parsed;
+        console.log(`[Storage] Loaded ${seedLinks.length} link(s) from local data file.`);
+      }
     }
   } catch (e) {
     console.error('Error reading seed file:', e.message);
@@ -89,7 +120,8 @@ function initStorage() {
       } else {
         const tmpRaw = fs.readFileSync(VERCEL_DATA_FILE, 'utf-8');
         const tmpLinks = JSON.parse(tmpRaw || '[]');
-        if (tmpLinks.length > 0) {
+        if (tmpLinks.length > seedLinks.length) {
+          // /tmp has more data (created during runtime), prefer it
           seedLinks = tmpLinks;
         }
       }
@@ -98,11 +130,25 @@ function initStorage() {
     }
   }
 
-  global.__NEXAA_CACHE__.links = seedLinks;
+  // Migrate any legacy links missing expiresAt
+  const { links: migrated, changed } = migrateLegacyLinks(seedLinks);
+  global.__NEXAA_CACHE__.links = migrated;
   global.__NEXAA_CACHE__.initialized = true;
+
+  // Persist migration changes
+  if (changed) {
+    try {
+      const dir = path.dirname(LOCAL_DATA_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(LOCAL_DATA_FILE, JSON.stringify(migrated, null, 2));
+      console.log('[Storage] Migrated legacy links: added expiresAt field.');
+    } catch (e) {
+      console.error('[Storage] Error persisting migration:', e.message);
+    }
+  }
 }
 
-// Read all links
+// Read all links (non-expired only for filtering is done at route level)
 async function readAllLinks() {
   initStorage();
 
@@ -113,8 +159,9 @@ async function readAllLinks() {
       if (kvData) {
         const parsed = typeof kvData === 'string' ? JSON.parse(kvData) : kvData;
         if (Array.isArray(parsed)) {
-          global.__NEXAA_CACHE__.links = parsed;
-          return parsed;
+          const { links: migrated } = migrateLegacyLinks(parsed);
+          global.__NEXAA_CACHE__.links = migrated;
+          return migrated;
         }
       }
     } catch (err) {
@@ -127,8 +174,9 @@ async function readAllLinks() {
     if (fs.existsSync(DATA_FILE)) {
       const data = fs.readFileSync(DATA_FILE, 'utf-8');
       const parsed = JSON.parse(data || '[]');
-      global.__NEXAA_CACHE__.links = parsed;
-      return parsed;
+      const { links: migrated } = migrateLegacyLinks(parsed);
+      global.__NEXAA_CACHE__.links = migrated;
+      return migrated;
     }
   } catch (err) {
     console.error('[File Read Error]', err.message);
@@ -156,17 +204,38 @@ async function saveAllLinks(links) {
     }
   }
 
-  // 2. Save to file (in /tmp on Vercel, or data/ on local)
+  // 2. Always save to local data file for persistence across restarts
   try {
-    const dir = path.dirname(DATA_FILE);
+    const dir = path.dirname(LOCAL_DATA_FILE);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(DATA_FILE, JSON.stringify(links, null, 2));
-    return true;
+    fs.writeFileSync(LOCAL_DATA_FILE, JSON.stringify(links, null, 2));
   } catch (err) {
-    console.error('[File Save Error]', err.message);
-    return false;
+    console.error('[Local File Save Error]', err.message);
+  }
+
+  // 3. Also save to /tmp on Vercel
+  if (IS_VERCEL) {
+    try {
+      fs.writeFileSync(VERCEL_DATA_FILE, JSON.stringify(links, null, 2));
+    } catch (err) {
+      console.error('[Vercel /tmp Save Error]', err.message);
+    }
+  }
+
+  return true;
+}
+
+// Remove expired links from storage (cleanup job)
+async function cleanupExpiredLinks() {
+  const links = await readAllLinks();
+  const now = new Date();
+  const active = links.filter(l => !l.expiresAt || new Date(l.expiresAt) > now);
+  const removed = links.length - active.length;
+  if (removed > 0) {
+    await saveAllLinks(active);
+    console.log(`[Cleanup] Removed ${removed} expired link(s). Active: ${active.length}`);
   }
 }
 
@@ -214,19 +283,22 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     domain: BRAND_DOMAIN,
     isVercel: IS_VERCEL,
-    storageType: HAS_KV ? 'Vercel KV / Redis' : (IS_VERCEL ? 'Vercel /tmp + Memory' : 'Local File System'),
+    storageType: HAS_KV ? 'Vercel KV / Redis' : (IS_VERCEL ? 'Vercel /tmp + Local File' : 'Local File System'),
     hasKvConnected: HAS_KV,
-    totalCachedLinks: global.__NEXAA_CACHE__.links.length
+    totalCachedLinks: global.__NEXAA_CACHE__.links.length,
+    linkExpiryDays: 30
   });
 });
 
 // Get overview stats
 app.get('/api/stats', async (req, res) => {
   const links = await readAllLinks();
-  const totalClicks = links.reduce((acc, curr) => acc + (curr.clicks || 0), 0);
+  const now = new Date();
+  const activeLinks = links.filter(l => !l.expiresAt || new Date(l.expiresAt) > now);
+  const totalClicks = activeLinks.reduce((acc, curr) => acc + (curr.clicks || 0), 0);
   res.json({
     success: true,
-    totalLinks: links.length,
+    totalLinks: activeLinks.length,
     totalClicks
   });
 });
@@ -251,6 +323,8 @@ app.post('/api/shorten', async (req, res) => {
   }
 
   const links = await readAllLinks();
+  // Only check against active (non-expired) links for slug uniqueness
+  const activeLinks = links.filter(l => !isExpired(l));
   let slug = '';
 
   if (customSlug && typeof customSlug === 'string' && customSlug.trim()) {
@@ -270,7 +344,7 @@ app.post('/api/shorten', async (req, res) => {
       });
     }
 
-    const exists = links.some(l => l.slug.toLowerCase() === cleanSlug);
+    const exists = activeLinks.some(l => l.slug.toLowerCase() === cleanSlug);
     if (exists) {
       return res.status(409).json({
         success: false,
@@ -284,8 +358,11 @@ app.post('/api/shorten', async (req, res) => {
     do {
       slug = generateSlug(6);
       attempts++;
-    } while (links.some(l => l.slug.toLowerCase() === slug.toLowerCase()) && attempts < 20);
+    } while (activeLinks.some(l => l.slug.toLowerCase() === slug.toLowerCase()) && attempts < 20);
   }
+
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + LINK_EXPIRY_MS);
 
   const newLink = {
     id: 'lnk_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -294,10 +371,12 @@ app.post('/api/shorten', async (req, res) => {
     shortUrl: `https://${BRAND_DOMAIN}/${slug}`,
     localTestUrl: `http://localhost:${PORT}/${slug}`,
     clicks: 0,
-    createdAt: new Date().toISOString(),
+    createdAt: createdAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
     lastAccessedAt: null
   };
 
+  // Keep all links (including expired ones for history), add new one
   links.push(newLink);
   await saveAllLinks(links);
 
@@ -315,9 +394,14 @@ app.get('/:slug', async (req, res) => {
   const link = links.find(l => l.slug.toLowerCase() === slug.toLowerCase());
 
   if (link) {
+    // Check expiry
+    if (isExpired(link)) {
+      return res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
+    }
+
     link.clicks = (link.clicks || 0) + 1;
     link.lastAccessedAt = new Date().toISOString();
-    
+
     // Save updated clicks in background
     saveAllLinks(links).catch(e => console.error('Error saving clicks:', e.message));
 
@@ -328,6 +412,17 @@ app.get('/:slug', async (req, res) => {
   res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
 });
 
+// ==========================================================
+// Startup
+// ==========================================================
+
+// Initialize storage on startup
+initStorage();
+
+// Run cleanup of expired links on startup and every hour
+cleanupExpiredLinks();
+setInterval(cleanupExpiredLinks, 60 * 60 * 1000);
+
 // Export app for Vercel Serverless Function & listen on local
 if (process.env.NODE_ENV !== 'production' || !IS_VERCEL) {
   app.listen(PORT, () => {
@@ -335,7 +430,8 @@ if (process.env.NODE_ENV !== 'production' || !IS_VERCEL) {
     console.log(`✨ Nexaa Link Shortener Server`);
     console.log(`🌐 Branding Domain: https://${BRAND_DOMAIN}`);
     console.log(`🚀 Local Server: http://localhost:${PORT}`);
-    console.log(`💾 Storage Mode: ${HAS_KV ? 'Vercel KV' : (IS_VERCEL ? 'Vercel /tmp' : 'Local File')}`);
+    console.log(`💾 Storage Mode: ${HAS_KV ? 'Vercel KV' : (IS_VERCEL ? 'Vercel /tmp + Local File' : 'Local File')}`);
+    console.log(`⏳ Link Expiry: 30 hari`);
     console.log(`===========================================`);
   });
 }

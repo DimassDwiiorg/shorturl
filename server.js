@@ -17,6 +17,11 @@ const LINK_EXPIRY_MS = LINK_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
 // Environment detection
 const IS_VERCEL = !!(process.env.VERCEL || process.env.NOW_REGION || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
+// Determine public directory (supports both standard and Vercel structures)
+const PUBLIC_DIR = fs.existsSync(path.join(__dirname, 'public'))
+  ? path.join(__dirname, 'public')
+  : path.join(__dirname, 'api', 'public');
+
 // Data paths for local fallback
 const LOCAL_DATA_FILE = path.join(__dirname, 'data', 'links.json');
 const VERCEL_DATA_FILE = path.join(os.tmpdir(), 'nexaa_links.json');
@@ -52,7 +57,7 @@ if (!global.__NEXAA_CACHE__) {
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(PUBLIC_DIR));
 
 // Normalize URL for Vercel Serverless Rewrites
 app.use((req, res, next) => {
@@ -83,7 +88,9 @@ function mapDbRow(row) {
     clicks: row.clicks || 0,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
-    lastAccessedAt: row.last_accessed_at
+    lastAccessedAt: row.last_accessed_at,
+    userId: row.user_id || null,
+    userEmail: row.user_email || null
   };
 }
 
@@ -158,23 +165,19 @@ async function getLinkBySlug(slug) {
 
       if (error) {
         console.error('[Supabase Query Error]', error.message);
-        throw error;
+      } else if (data) {
+        // Check expiry (30 days)
+        if (isLinkExpired(data.expires_at)) {
+          return null;
+        }
+        return mapDbRow(data);
       }
-
-      if (!data) return null;
-
-      // Check expiry (30 days)
-      if (isLinkExpired(data.expires_at)) {
-        return null;
-      }
-
-      return mapDbRow(data);
     } catch (err) {
       console.warn('[Supabase Fallback to Local]', err.message);
     }
   }
 
-  // 2. Fallback to local storage
+  // 2. Fallback to local storage (checks local file if not found in cloud)
   const links = readLocalLinks();
   const link = links.find(l => l.slug.toLowerCase() === cleanSlug);
   if (link && !isLinkExpired(link.expiresAt)) {
@@ -195,13 +198,11 @@ async function isSlugAvailable(slug) {
         .maybeSingle();
 
       if (!error && data) {
-        // If it exists but already expired, it can be overwritten / reused
         if (isLinkExpired(data.expires_at)) {
           return true;
         }
         return false;
       }
-      return true;
     } catch (err) {
       console.warn('[Supabase Slug Check Fallback]', err.message);
     }
@@ -211,11 +212,26 @@ async function isSlugAvailable(slug) {
   return !links.some(l => l.slug.toLowerCase() === cleanSlug && !isLinkExpired(l.expiresAt));
 }
 
-async function createLinkRecord({ slug, destination }) {
+async function createLinkRecord({ slug, destination, userId = null, userEmail = null }) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + LINK_EXPIRY_MS);
   const id = 'lnk_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const shortUrl = `https://${BRAND_DOMAIN}/${slug}`;
+
+  // Always prepare fallback local object
+  const newLocalLink = {
+    id,
+    slug,
+    destination,
+    shortUrl,
+    localTestUrl: `http://localhost:${PORT}/${slug}`,
+    clicks: 0,
+    createdAt: now.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    lastAccessedAt: null,
+    userId: userId || null,
+    userEmail: userEmail || null
+  };
 
   // 1. Save to Supabase if connected
   if (supabase) {
@@ -228,22 +244,47 @@ async function createLinkRecord({ slug, destination }) {
         clicks: 0,
         created_at: now.toISOString(),
         expires_at: expiresAt.toISOString(),
-        last_accessed_at: null
+        last_accessed_at: null,
+        user_id: userId || null,
+        user_email: userEmail || null
       };
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('links')
         .upsert(newRow, { onConflict: 'slug' })
         .select()
         .single();
 
+      // If user_id column is missing in existing Supabase table, retry without user_id
+      if (error && (error.message.includes('user_id') || error.code === 'PGRST204')) {
+        console.warn('[Supabase] Kolom user_id belum ada di Supabase. Menyimpan tanpa kolom user_id...');
+        delete newRow.user_id;
+        delete newRow.user_email;
+        const retry = await supabase
+          .from('links')
+          .upsert(newRow, { onConflict: 'slug' })
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (error) {
-        console.error('[Supabase Insert Error]', error.message);
         throw error;
       }
 
-      console.log(`[Supabase] Created shortlink: ${slug} -> ${destination} (Expires: ${expiresAt.toISOString()})`);
-      return mapDbRow(data);
+      console.log(`[Supabase] Created shortlink: ${slug} -> ${destination} (User: ${userId || 'Guest'}, Expires: ${expiresAt.toISOString()})`);
+      const mapped = mapDbRow(data);
+      if (userId && !mapped.userId) mapped.userId = userId;
+      if (userEmail && !mapped.userEmail) mapped.userEmail = userEmail;
+
+      // Keep local in sync for fast local fallback
+      const localLinks = readLocalLinks();
+      const filtered = localLinks.filter(l => l.slug.toLowerCase() !== slug.toLowerCase());
+      filtered.push(mapped);
+      saveLocalLinks(filtered);
+
+      return mapped;
     } catch (err) {
       console.error('[Supabase Failed, falling back to local file]', err.message);
     }
@@ -251,24 +292,11 @@ async function createLinkRecord({ slug, destination }) {
 
   // 2. Fallback to Local Storage
   const links = readLocalLinks();
-  const newLink = {
-    id,
-    slug,
-    destination,
-    shortUrl,
-    localTestUrl: `http://localhost:${PORT}/${slug}`,
-    clicks: 0,
-    createdAt: now.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-    lastAccessedAt: null
-  };
-
-  // Remove existing expired slug if any, then push
   const filtered = links.filter(l => l.slug.toLowerCase() !== slug.toLowerCase());
-  filtered.push(newLink);
+  filtered.push(newLocalLink);
   saveLocalLinks(filtered);
 
-  return newLink;
+  return newLocalLink;
 }
 
 async function recordClick(linkId, currentClicks) {
@@ -283,13 +311,12 @@ async function recordClick(linkId, currentClicks) {
           last_accessed_at: now
         })
         .eq('id', linkId);
-      return;
     } catch (err) {
       console.error('[Supabase Click Record Error]', err.message);
     }
   }
 
-  // Fallback to local file
+  // Fallback / sync to local file
   const links = readLocalLinks();
   const item = links.find(l => l.id === linkId);
   if (item) {
@@ -297,6 +324,81 @@ async function recordClick(linkId, currentClicks) {
     item.lastAccessedAt = now;
     saveLocalLinks(links);
   }
+}
+
+async function getUserLinks(userId) {
+  if (!userId) return [];
+  let userLinks = [];
+
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('links')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        userLinks = data.map(mapDbRow);
+      }
+    } catch (err) {
+      console.warn('[Supabase getUserLinks Fallback]', err.message);
+    }
+  }
+
+  // Also include/merge any links stored locally for this userId
+  const localList = readLocalLinks().filter(l => l.userId === userId);
+  for (const item of localList) {
+    if (!userLinks.some(u => u.id === item.id || u.slug === item.slug)) {
+      userLinks.push(item);
+    }
+  }
+
+  return userLinks.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+async function deleteLink(linkId, userId) {
+  if (!linkId) return { success: false, error: 'Link ID diperlukan.' };
+
+  let deletedFromSupabase = false;
+  if (supabase) {
+    try {
+      const { data: existing, error: fetchErr } = await supabase
+        .from('links')
+        .select('*')
+        .eq('id', linkId)
+        .maybeSingle();
+
+      if (!fetchErr && existing) {
+        if (existing.user_id && userId && existing.user_id !== userId) {
+          return { success: false, status: 403, error: 'Anda tidak memiliki izin untuk menghapus tautan ini.' };
+        }
+        await supabase.from('links').delete().eq('id', linkId);
+        deletedFromSupabase = true;
+        console.log(`[Supabase] Deleted link: ${linkId}`);
+      }
+    } catch (err) {
+      console.warn('[Supabase delete check fallback]', err.message);
+    }
+  }
+
+  // Also remove from local storage
+  const links = readLocalLinks();
+  const index = links.findIndex(l => l.id === linkId);
+  if (index !== -1) {
+    if (links[index].userId && userId && links[index].userId !== userId) {
+      return { success: false, status: 403, error: 'Anda tidak memiliki izin untuk menghapus tautan ini.' };
+    }
+    links.splice(index, 1);
+    saveLocalLinks(links);
+    return { success: true, message: 'Tautan berhasil dihapus.' };
+  }
+
+  if (deletedFromSupabase) {
+    return { success: true, message: 'Tautan berhasil dihapus.' };
+  }
+
+  return { success: false, status: 404, error: 'Tautan tidak ditemukan.' };
 }
 
 async function getSystemStats() {
@@ -368,6 +470,19 @@ function normalizeUrl(url) {
 // API Routes
 // ==========================================================
 
+// Firebase public config endpoint for frontend SDK
+app.get('/api/firebase-config', (req, res) => {
+  res.json({
+    apiKey: process.env.FIREBASE_API_KEY || '',
+    authDomain: process.env.FIREBASE_AUTH_DOMAIN || '',
+    projectId: process.env.FIREBASE_PROJECT_ID || '',
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET || '',
+    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || '',
+    appId: process.env.FIREBASE_APP_ID || '',
+    configured: !!(process.env.FIREBASE_API_KEY && process.env.FIREBASE_PROJECT_ID)
+  });
+});
+
 // Health / Status endpoint
 app.get('/api/health', (req, res) => {
   res.json({
@@ -376,11 +491,12 @@ app.get('/api/health', (req, res) => {
     isVercel: IS_VERCEL,
     database: supabase ? 'Supabase (PostgreSQL Cloud)' : 'Local File Storage (Fallback)',
     isSupabaseConnected: !!supabase,
-    linkExpiryDays: LINK_EXPIRY_DAYS
+    linkExpiryDays: LINK_EXPIRY_DAYS,
+    firebaseConfigured: !!(process.env.FIREBASE_API_KEY && process.env.FIREBASE_PROJECT_ID)
   });
 });
 
-// Get overview stats
+// Get overview stats (Global)
 app.get('/api/stats', async (req, res) => {
   const stats = await getSystemStats();
   res.json({
@@ -389,9 +505,69 @@ app.get('/api/stats', async (req, res) => {
   });
 });
 
+// Get user specific links & monitoring
+app.get('/api/user/links', async (req, res) => {
+  const userId = (req.query.userId || '').trim();
+  if (!userId) {
+    return res.status(400).json({
+      success: false,
+      error: 'Parameter userId wajib disertakan.'
+    });
+  }
+
+  try {
+    const userLinks = await getUserLinks(userId);
+    const totalClicks = userLinks.reduce((acc, curr) => acc + (curr.clicks || 0), 0);
+
+    const mapped = userLinks.map(l => ({
+      ...l,
+      isExpired: isLinkExpired(l.expiresAt)
+    }));
+
+    res.json({
+      success: true,
+      links: mapped,
+      totalLinks: mapped.length,
+      totalClicks
+    });
+  } catch (err) {
+    console.error('Error fetching user links:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Gagal mengambil riwayat tautan.'
+    });
+  }
+});
+
+// Delete a link
+app.delete('/api/links/:id', async (req, res) => {
+  const { id } = req.params;
+  const userId = req.query.userId || req.body?.userId || null;
+
+  if (!id) {
+    return res.status(400).json({
+      success: false,
+      error: 'ID tautan tidak valid.'
+    });
+  }
+
+  const result = await deleteLink(id, userId);
+  if (!result.success) {
+    return res.status(result.status || 400).json({
+      success: false,
+      error: result.error
+    });
+  }
+
+  res.json({
+    success: true,
+    message: result.message
+  });
+});
+
 // Shorten URL
 app.post('/api/shorten', async (req, res) => {
-  const { url, customSlug } = req.body;
+  const { url, customSlug, userId, userEmail } = req.body;
 
   if (!url || typeof url !== 'string' || !url.trim()) {
     return res.status(400).json({
@@ -455,7 +631,13 @@ app.post('/api/shorten', async (req, res) => {
   }
 
   try {
-    const newLink = await createLinkRecord({ slug, destination });
+    const newLink = await createLinkRecord({
+      slug,
+      destination,
+      userId: userId || null,
+      userEmail: userEmail || null
+    });
+
     res.status(201).json({
       success: true,
       link: newLink
@@ -488,7 +670,12 @@ app.get('/:slug', async (req, res) => {
   }
 
   // Not found or expired -> 404 page
-  res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
+  const notFoundFile = path.join(PUBLIC_DIR, '404.html');
+  if (fs.existsSync(notFoundFile)) {
+    res.status(404).sendFile(notFoundFile);
+  } else {
+    res.status(404).send('404 Not Found');
+  }
 });
 
 // ==========================================================
@@ -503,6 +690,7 @@ if (process.env.NODE_ENV !== 'production' || !IS_VERCEL) {
     console.log(`🚀 Local Server: http://localhost:${PORT}`);
     console.log(`💾 Storage: ${supabase ? '☁️ Supabase Cloud (PostgreSQL)' : '📁 Local JSON (Set SUPABASE_URL in .env for Cloud)'}`);
     console.log(`⏳ Link Expiry: ${LINK_EXPIRY_DAYS} Hari`);
+    console.log(`🔐 Firebase Auth: ${process.env.FIREBASE_API_KEY ? 'Siap' : 'Menunggu konfigurasi di .env'}`);
     console.log(`===========================================`);
   });
 }

@@ -385,7 +385,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
           }
           if (err.code === 'auth/unauthorized-domain') {
-            showToast('Domain belum diotorisasi di Firebase Console (Authorized domains).', 'fa-circle-exclamation');
+            showToast('Domain nexaa.my.id belum ditambahkan di Firebase Console (Authentication > Settings > Authorized domains).', 'fa-circle-exclamation');
+          } else if (err.code === 'auth/configuration-not-found') {
+            showToast('Google Sign-In belum diaktifkan di Firebase Console (Authentication > Sign-in method > Google > Enable).', 'fa-circle-exclamation');
           } else {
             showToast(`Gagal login: ${err.message}`, 'fa-circle-exclamation');
           }

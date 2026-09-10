@@ -1221,9 +1221,10 @@ body {
   transform: translateY(-1px);
 }
 
-.btn-google-auth i {
-  color: #ea4335;
-  font-size: 14px;
+.google-icon {
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .user-profile-widget {
@@ -1343,10 +1344,6 @@ body {
 .btn-banner-google:hover {
   background: var(--btn-primary-hover);
   transform: translateY(-1px);
-}
-
-.btn-banner-google i {
-  color: #ea4335;
 }
 
 /* User Dashboard Section */

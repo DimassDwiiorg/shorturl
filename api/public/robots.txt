@@ -1,0 +1,7 @@
+# robots.txt for https://nexaa.my.id
+User-agent: *
+Allow: /
+Allow: /assets/
+Disallow: /api/
+
+Sitemap: https://nexaa.my.id/sitemap.xml

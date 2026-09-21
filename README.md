@@ -17,4 +17,4 @@ Website pemendek tautan (URL Shortener) modern, bersih, dan berkelas dengan doma
 
 ---
 
-Developed with precision by **Dimass**
+Developed by _**Dimass**_
